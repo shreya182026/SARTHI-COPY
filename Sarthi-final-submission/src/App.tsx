@@ -375,8 +375,11 @@ const modes = hasTransit
               ? 'Alternative road route from the routing service.'
               : 'Additional road-route alternative from the routing service.',
 
-          context:
-            `Backend route intelligence • ${route.source}` +
+         context:
+  `Backend route intelligence • ${route.source}` +
+  (hasTransit
+    ? ' • Nearby public-transit infrastructure found'
+    : ' • No nearby public-transit infrastructure found') +
             (
               suit?.recommendation
                 ? ` • ${suit.recommendation}`
