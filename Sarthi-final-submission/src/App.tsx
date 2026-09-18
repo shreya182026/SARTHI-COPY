@@ -326,7 +326,12 @@ const transitStations = Array.isArray(
 
         const walk = 0;
         const transfers = 0;
-        const modes = ['Road'];
+       const hasTransit =
+  transitStations.length > 0;
+
+const modes = hasTransit
+  ? ['Road', 'Public Transit']
+  : ['Road'];
 
         const suitRes = await fetch(
           `/api/route-suitability` +
