@@ -286,6 +286,18 @@ const searchStartPlaces = async (q: string) => {
       .catch(() => ({ context: { weather: {} } }));
 
     const w = weather.context?.weather || {};
+    const transitJson = await transitRes
+  .json()
+  .catch(() => ({
+    success: false,
+    stations: []
+  }));
+
+const transitStations = Array.isArray(
+  transitJson?.stations
+)
+  ? transitJson.stations
+  : [];
 
     const priority =
       priorities.includes('Faster travel')
