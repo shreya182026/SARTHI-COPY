@@ -238,12 +238,265 @@ const searchStartPlaces = async (q: string) => {
   }
 };
  const selected=routes[selectedRoute] || null;
- const buildRoute = async () => {
+const buildRoute = async () => {
   if (!fromCoords || !toCoords) {
     setRoutes(makeFallbackRoutes());
     nav('routes');
     return;
   }
+
+  setLoadingRoutes(true);
+
+  try {
+    const qs =
+      `?from=${encodeURIComponent(from)}` +
+      `&to=${encodeURIComponent(to)}`;
+
+    const [routeRes, contextRes, transitRes] = await Promise.all([
+      fetch(`/api/route-intelligence${qs}`),
+
+      fetch(
+        `/api/context-intelligence` +
+        `?lat=${fromCoords.lat}` +
+        `&lon=${fromCoords.lng}` +
+        `&connectivity=${encodeURIComponent(connectivity)}` +
+        `&battery=${battery}`
+      ),
+
+      fetch(
+        `/api/transit-intelligence` +
+        `?fromLat=${fromCoords.lat}` +
+        `&fromLon=${fromCoords.lng}` +
+        `&toLat=${toCoords.lat}` +
+        `&toLon=${toCoords.lng}`
+      )
+    ]);
+
+    if (!routeRes.ok) {
+      throw new Error('Backend route intelligence unavailable');
+    }
+
+    const routeJson = await routeRes.json();
+
+    if (!routeJson.success || !routeJson.routes?.length) {
+      throw new Error('No backend route');
+    }
+
+    const weather = await contextRes
+      .json()
+      .catch(() => ({
+        context: {
+          weather: {}
+        }
+      }));
+
+    const w = weather.context?.weather || {};
+
+    const transitJson = await transitRes
+      .json()
+      .catch(() => ({
+        success: false,
+        stations: []
+      }));
+
+    const transitStations = Array.isArray(
+      transitJson?.stations
+    )
+      ? transitJson.stations
+      : [];
+
+    const priority =
+      priorities.includes('Faster travel')
+        ? 'fastest'
+        : priorities.includes('Lower walking')
+        ? 'less_walking'
+        : priorities.includes('Lower cost')
+        ? 'low_cost'
+        : 'balanced';
+
+    const raw = routeJson.routes.slice(0, 3);
+
+    const rts: Route[] = await Promise.all(
+      raw.map(async (route: any, index: number) => {
+
+        const walk = 0;
+        const transfers = 0;
+
+        const hasTransit =
+          transitStations.length > 0;
+
+        const modes = hasTransit
+          ? ['Road', 'Public Transit']
+          : ['Road'];
+
+        const priorityMatch =
+          priority === 'fastest'
+            ? route.durationMin <= 35
+              ? 1
+              : 0
+            : priority === 'low_cost'
+            ? route.estimatedCost <= 80
+              ? 1
+              : 0
+            : priority === 'less_walking'
+            ? walk <= 8
+              ? 1
+              : 0
+            : 0.5;
+
+        const mlRes = await fetch(
+          `/api/ml-route-suitability` +
+          `?duration=${route.durationMin}` +
+          `&cost=${route.estimatedCost}` +
+          `&walking=${walk}` +
+          `&transfers=${transfers}` +
+          `&connectivity=${encodeURIComponent(connectivity)}` +
+          `&battery=${battery}` +
+          `&helpPoints=3` +
+          `&rain=${w.rain ?? 0}` +
+          `&windSpeed=${w.windSpeed ?? 0}` +
+          `&priorityMatch=${priorityMatch}`
+        );
+
+        const ml = mlRes.ok
+          ? await mlRes.json()
+          : null;
+
+        const suitRes = await fetch(
+          `/api/route-suitability` +
+          `?duration=${route.durationMin}` +
+          `&cost=${route.estimatedCost}` +
+          `&walking=${walk}` +
+          `&transfers=${transfers}` +
+          `&connectivity=${encodeURIComponent(connectivity)}` +
+          `&battery=${battery}` +
+          `&helpPoints=3` +
+          `&rain=${w.rain ?? 0}` +
+          `&windSpeed=${w.windSpeed ?? 0}` +
+          `&priority=${priority}`
+        );
+
+        const suit = suitRes.ok
+          ? await suitRes.json()
+          : null;
+
+        return {
+          id: `r${index + 1}`,
+
+          title: `Route ${index + 1}`,
+
+          duration: route.durationMin,
+
+          cost: route.estimatedCost,
+
+          distance: route.distanceKm,
+
+          walking: walk,
+
+          transfers,
+
+          modes,
+
+          reason:
+            index === 0
+              ? 'Direct road route based on the current routing result and your saved priorities.'
+              : index === 1
+              ? 'Alternative road route from the routing service.'
+              : 'Additional road-route alternative from the routing service.',
+
+          context:
+            `Backend route intelligence • ${route.source}` +
+            (
+              hasTransit
+                ? ' • Nearby public-transit infrastructure found'
+                : ' • No nearby public-transit infrastructure found'
+            ) +
+            (
+              ml?.model
+                ? ` • ${ml.model}`
+                : ''
+            ) +
+            (
+              suit?.recommendation
+                ? ` • ${suit.recommendation}`
+                : ''
+            ),
+
+          confidence:
+            suit?.suitabilityScore >= 0.75
+              ? 'High'
+              : suit?.suitabilityScore >= 0.55
+              ? 'Moderate'
+              : 'Limited',
+
+          updated: 'Backend • just now',
+
+          firstMile:
+            hasTransit
+              ? `Road access + nearby transit infrastructure (${transitStations.length} station${transitStations.length === 1 ? '' : 's'})`
+              : 'Road journey starts from selected location',
+
+          lastMile:
+            hasTransit
+              ? 'Transit/road connection to selected destination'
+              : 'Road journey ends at selected destination',
+
+          steps:
+            (route.steps || [])
+              .slice(0, 5)
+              .map(
+                (x: any) =>
+                  x.name ||
+                  x.maneuver?.instruction ||
+                  'Continue'
+              ),
+
+          geometry:
+            (route.geometry?.coordinates || [])
+              .map(
+                ([lng, lat]: [number, number]) =>
+                  [lat, lng] as [number, number]
+              ),
+
+          traffic: 'Unavailable',
+
+          fingerprint: [
+            route.distanceKm,
+            route.durationMin,
+            route.estimatedCost,
+            suit?.suitabilityScore ?? null,
+            ml?.suitabilityScore ?? null
+          ].map(String)
+        };
+      })
+    );
+
+    setRoutes(
+      rts.length
+        ? rts
+        : makeFallbackRoutes()
+    );
+
+    setSelectedRoute(0);
+
+    nav('routes');
+
+  } catch (error) {
+
+    console.error(
+      'Route build error:',
+      error
+    );
+
+    setRoutes(makeFallbackRoutes());
+
+    nav('routes');
+
+  } finally {
+
+    setLoadingRoutes(false);
+  }
+};
 
   setLoadingRoutes(true);
 
