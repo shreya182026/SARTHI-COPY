@@ -332,7 +332,38 @@ const transitStations = Array.isArray(
 const modes = hasTransit
   ? ['Road', 'Public Transit']
   : ['Road'];
+const priorityMatch =
+  priority === 'fastest'
+    ? route.durationMin <= 35
+      ? 1
+      : 0
+    : priority === 'low_cost'
+    ? route.estimatedCost <= 80
+      ? 1
+      : 0
+    : priority === 'less_walking'
+    ? walk <= 8
+      ? 1
+      : 0
+    : 0.5;
 
+const mlRes = await fetch(
+  `/api/ml-route-suitability` +
+  `?duration=${route.durationMin}` +
+  `&cost=${route.estimatedCost}` +
+  `&walking=${walk}` +
+  `&transfers=${transfers}` +
+  `&connectivity=${encodeURIComponent(connectivity)}` +
+  `&battery=${battery}` +
+  `&helpPoints=3` +
+  `&rain=${w.rain ?? 0}` +
+  `&windSpeed=${w.windSpeed ?? 0}` +
+  `&priorityMatch=${priorityMatch}`
+);
+
+const ml = mlRes.ok
+  ? await mlRes.json()
+  : null;
         const suitRes = await fetch(
           `/api/route-suitability` +
           `?duration=${route.durationMin}` +
