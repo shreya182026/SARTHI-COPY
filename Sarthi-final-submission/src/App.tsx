@@ -252,15 +252,24 @@ const searchStartPlaces = async (q: string) => {
       `?from=${encodeURIComponent(from)}` +
       `&to=${encodeURIComponent(to)}`;
 
-    const [routeRes, contextRes] = await Promise.all([
-      fetch(`/api/route-intelligence${qs}`),
-      fetch(
-        `/api/context-intelligence?lat=${fromCoords.lat}` +
-        `&lon=${fromCoords.lng}` +
-        `&connectivity=${encodeURIComponent(connectivity)}` +
-        `&battery=${battery}`
-      )
-    ]);
+  const [routeRes, contextRes, transitRes] = await Promise.all([
+  fetch(`/api/route-intelligence${qs}`),
+
+  fetch(
+    `/api/context-intelligence?lat=${fromCoords.lat}` +
+    `&lon=${fromCoords.lng}` +
+    `&connectivity=${encodeURIComponent(connectivity)}` +
+    `&battery=${battery}`
+  ),
+
+  fetch(
+    `/api/transit-intelligence` +
+    `?fromLat=${fromCoords.lat}` +
+    `&fromLon=${fromCoords.lng}` +
+    `&toLat=${toCoords.lat}` +
+    `&toLon=${toCoords.lng}`
+  )
+]);
 
     if (!routeRes.ok) {
       throw new Error('Backend route intelligence unavailable');
