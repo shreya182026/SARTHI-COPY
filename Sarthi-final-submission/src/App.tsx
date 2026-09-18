@@ -408,6 +408,16 @@ const ml = mlRes.ok
 
          context:
   `Backend route intelligence • ${route.source}` +
+  (
+    ml?.model
+      ? ` • ${ml.model}`
+      : ''
+  ) +
+  (
+    suit?.recommendation
+      ? ` • ${suit.recommendation}`
+      : ''
+  ),
   (hasTransit
     ? ' • Nearby public-transit infrastructure found'
     : ' • No nearby public-transit infrastructure found') +
