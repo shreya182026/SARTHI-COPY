@@ -470,12 +470,13 @@ lastMile:
            */
           traffic: 'Unavailable',
 
-          fingerprint: [
-            route.distanceKm,
-            route.durationMin,
-            route.estimatedCost,
-            suit?.suitabilityScore ?? null
-          ].map(String)
+         fingerprint: [
+  route.distanceKm,
+  route.durationMin,
+  route.estimatedCost,
+  suit?.suitabilityScore ?? null,
+  ml?.suitabilityScore ?? null
+].map(String)
         };
       })
     );
