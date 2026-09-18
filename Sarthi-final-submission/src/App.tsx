@@ -392,9 +392,15 @@ const modes = hasTransit
 
           updated: 'Backend • just now',
 
-          firstMile: 'Road journey starts from selected location',
+          firstMile:
+  hasTransit
+    ? `Road access + nearby transit infrastructure (${transitStations.length} station${transitStations.length === 1 ? '' : 's'})`
+    : 'Road journey starts from selected location',
 
-          lastMile: 'Road journey ends at selected destination',
+lastMile:
+  hasTransit
+    ? 'Transit/road connection to selected destination'
+    : 'Road journey ends at selected destination',
 
           steps:
             (route.steps || [])
