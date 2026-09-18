@@ -18,7 +18,7 @@ type Screen =
 
 type Coords={lat:number;lng:number};
 type Place={display_name:string;lat:string|number;lon:string|number};
-type Route={id:string;title:string;duration:number;distance:number;cost:number;walking:number;transfers:number;modes:string[];reason:string;context:string;confidence:'High'|'Moderate'|'Limited';updated:string;firstMile:string;lastMile:string;steps:string[];geometry:[number,number][];traffic:'Light'|'Moderate'|'Heavy';fingerprint?:string[]};
+type Route={id:string;title:string;duration:number;distance:number;cost:number;walking:number;transfers:number;modes:string[];reason:string;context:string;confidence:'High'|'Moderate'|'Limited';updated:string;firstMile:string;lastMile:string;steps:string[];geometry:[number,number][];traffic:'Light'|'Moderate'|'Heavy'|'Unavailable';fingerprint?:string[]};
 type Profile={name:string;phone:string;age:string;career:string;income:string;walkingComfort:'Low'|'Moderate'|'Comfortable';travelModes:string[];priorities:string[];completed:boolean;isGuest?:boolean;memberSince?:string};
 type Contact={id:string;name:string;relation:string;phone:string;primary:boolean};
 type JourneyPoint={id:string;name:string;kind:'checkpoint'|'help';coords:Coords;category:string;distanceKm:number;source:'OpenStreetMap'|'Route fallback';details?:string;routeIndex?:number};
