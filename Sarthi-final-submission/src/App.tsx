@@ -238,7 +238,196 @@ const searchStartPlaces = async (q: string) => {
   }
 };
  const selected=routes[selectedRoute] || null;
- const buildRoute=async()=>{if(!fromCoords||!toCoords){setRoutes(makeFallbackRoutes());nav('routes');return}setLoadingRoutes(true);try{const qs=`?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`;const [routeRes,contextRes]=await Promise.all([fetch(`/api/route-intelligence${qs}`),fetch(`/api/context-intelligence?lat=${fromCoords.lat}&lon=${fromCoords.lng}&connectivity=${encodeURIComponent(connectivity)}&battery=${battery}`)]);if(!routeRes.ok)throw new Error('backend route intelligence unavailable');const routeJson=await routeRes.json();if(!routeJson.success||!routeJson.routes?.length)throw new Error('no backend route');const weather=await contextRes.json().catch(()=>({context:{weather:{}}}));const w=weather.context?.weather||{};const priority=priorities.includes('Faster travel')?'fastest':priorities.includes('Lower walking')?'less_walking':priorities.includes('Lower cost')?'low_cost':'balanced';const raw=routeJson.routes.slice(0,3);const rts:Route[]=await Promise.all(raw.map(async(route:any,index:number)=>{const walk=index===0?Math.max(4,Math.round(route.distanceKm*0.18)):index===1?Math.max(3,Math.round(route.distanceKm*0.12)):2;const transfers=index===0?1:index===1?1:0;const modes=index===0?['Walk','Metro']:index===1?['Auto / Rickshaw','Metro']:['Cab'];const suitRes=await fetch(`/api/route-suitability?duration=${route.durationMin}&cost=${route.estimatedCost}&walking=${walk}&transfers=${transfers}&connectivity=${encodeURIComponent(connectivity)}&battery=${battery}&helpPoints=3&rain=${w.rain??0}&windSpeed=${w.windSpeed??0}&priority=${priority}`);const suit=suitRes.ok?await suitRes.json():null;return{id:`r${index+1}`,title:`Route ${index+1}`,duration:route.durationMin,cost:route.estimatedCost,distance:route.distanceKm,walking:walk,transfers,modes,reason:index===0?'Balanced option using the live routed path and your saved priorities.':index===1?'Alternative with lower walking and a different live road path.':'Direct-style option with minimal walking; provider details remain to be verified.',context:`Backend route intelligence • ${route.source}${suit?.recommendation?` • ${suit.recommendation}`:''}`,confidence:suit?.suitabilityScore>=.75?'High':suit?.suitabilityScore>=.55?'Moderate':'Limited',updated:'Backend • just now',firstMile:index===0?'5–8 min walk → transit':index===1?'Auto pickup → Metro':'Cab pickup near start',lastMile:index===0?'5–10 min walk → destination':index===1?'Short walk → destination':'Drop-off near destination',steps:(route.steps||[]).slice(0,5).map((x:any)=>x.name||x.maneuver?.instruction||'Continue'),geometry:(route.geometry?.coordinates||[]).map(([lng,lat]:[number,number])=>[lat,lng] as [number,number]),traffic:index===0?'Moderate':index===1?'Heavy':'Light',fingerprint:[route.distanceKm,route.durationMin,route.estimatedCost,suit?.suitabilityScore??null].map(String)}}));setRoutes(rts.length?rts:makeFallbackRoutes());setSelectedRoute(0);nav('routes')}catch{setRoutes(makeFallbackRoutes());nav('routes')}finally{setLoadingRoutes(false)}};
+ const buildRoute = async () => {
+  if (!fromCoords || !toCoords) {
+    setRoutes(makeFallbackRoutes());
+    nav('routes');
+    return;
+  }
+
+  setLoadingRoutes(true);
+
+  try {
+    const qs =
+      `?from=${encodeURIComponent(from)}` +
+      `&to=${encodeURIComponent(to)}`;
+
+    const [routeRes, contextRes] = await Promise.all([
+      fetch(`/api/route-intelligence${qs}`),
+      fetch(
+        `/api/context-intelligence?lat=${fromCoords.lat}` +
+        `&lon=${fromCoords.lng}` +
+        `&connectivity=${encodeURIComponent(connectivity)}` +
+        `&battery=${battery}`
+      )
+    ]);
+
+    if (!routeRes.ok) {
+      throw new Error('Backend route intelligence unavailable');
+    }
+
+    const routeJson = await routeRes.json();
+
+    if (!routeJson.success || !routeJson.routes?.length) {
+      throw new Error('No backend route');
+    }
+
+    const weather = await contextRes
+      .json()
+      .catch(() => ({ context: { weather: {} } }));
+
+    const w = weather.context?.weather || {};
+
+    const priority =
+      priorities.includes('Faster travel')
+        ? 'fastest'
+        : priorities.includes('Lower walking')
+        ? 'less_walking'
+        : priorities.includes('Lower cost')
+        ? 'low_cost'
+        : 'balanced';
+
+    const raw = routeJson.routes.slice(0, 3);
+
+    const rts: Route[] = await Promise.all(
+      raw.map(async (route: any, index: number) => {
+
+        /*
+         * IMPORTANT:
+         * OSRM currently gives us real road-routing data.
+         * It does NOT give us verified Metro/Auto/Cab availability
+         * or live traffic.
+         *
+         * Therefore we only label the route according to the
+         * actual routing source instead of pretending those
+         * transport details are live.
+         */
+
+        const walk = 0;
+        const transfers = 0;
+        const modes = ['Road'];
+
+        const suitRes = await fetch(
+          `/api/route-suitability` +
+          `?duration=${route.durationMin}` +
+          `&cost=${route.estimatedCost}` +
+          `&walking=${walk}` +
+          `&transfers=${transfers}` +
+          `&connectivity=${encodeURIComponent(connectivity)}` +
+          `&battery=${battery}` +
+          `&helpPoints=3` +
+          `&rain=${w.rain ?? 0}` +
+          `&windSpeed=${w.windSpeed ?? 0}` +
+          `&priority=${priority}`
+        );
+
+        const suit = suitRes.ok
+          ? await suitRes.json()
+          : null;
+
+        return {
+          id: `r${index + 1}`,
+
+          title: `Route ${index + 1}`,
+
+          duration: route.durationMin,
+
+          cost: route.estimatedCost,
+
+          distance: route.distanceKm,
+
+          walking: walk,
+
+          transfers,
+
+          modes,
+
+          reason:
+            index === 0
+              ? 'Direct road route based on the current routing result and your saved priorities.'
+              : index === 1
+              ? 'Alternative road route from the routing service.'
+              : 'Additional road-route alternative from the routing service.',
+
+          context:
+            `Backend route intelligence • ${route.source}` +
+            (
+              suit?.recommendation
+                ? ` • ${suit.recommendation}`
+                : ''
+            ),
+
+          confidence:
+            suit?.suitabilityScore >= 0.75
+              ? 'High'
+              : suit?.suitabilityScore >= 0.55
+              ? 'Moderate'
+              : 'Limited',
+
+          updated: 'Backend • just now',
+
+          firstMile: 'Road journey starts from selected location',
+
+          lastMile: 'Road journey ends at selected destination',
+
+          steps:
+            (route.steps || [])
+              .slice(0, 5)
+              .map(
+                (x: any) =>
+                  x.name ||
+                  x.maneuver?.instruction ||
+                  'Continue'
+              ),
+
+          geometry:
+            (route.geometry?.coordinates || [])
+              .map(
+                ([lng, lat]: [number, number]) =>
+                  [lat, lng] as [number, number]
+              ),
+
+          /*
+           * Traffic is NOT currently coming from a live traffic API.
+           * Keep this explicit instead of displaying a fabricated
+           * Heavy/Moderate/Light value.
+           */
+          traffic: 'Unavailable',
+
+          fingerprint: [
+            route.distanceKm,
+            route.durationMin,
+            route.estimatedCost,
+            suit?.suitabilityScore ?? null
+          ].map(String)
+        };
+      })
+    );
+
+    setRoutes(
+      rts.length
+        ? rts
+        : makeFallbackRoutes()
+    );
+
+    setSelectedRoute(0);
+
+    nav('routes');
+
+  } catch (error) {
+
+    console.error('Route build error:', error);
+
+    setRoutes(makeFallbackRoutes());
+
+    nav('routes');
+
+  } finally {
+
+    setLoadingRoutes(false);
+
+  }
+};
  const makeFallbackRoutes=():Route[]=>{const c=fromCoords||location||{lat:28.6139,lng:77.209};const d=toCoords||{lat:c.lat+0.03,lng:c.lng+0.02};const geom: [number,number][]=[[c.lat,c.lng],[c.lat+(d.lat-c.lat)*.35,c.lng+(d.lng-c.lng)*.35],[c.lat+(d.lat-c.lat)*.7,c.lng+(d.lng-c.lng)*.7],[d.lat,d.lng]];return [
   {id:'r1',title:'Route 1',duration:32,cost:40,distance:9.2,walking:7,transfers:1,modes:['Walk','Metro'],reason:'Currently fits your saved priorities well.',context:'Demo road/transit context used because live routing is unavailable.',confidence:'Moderate',updated:'Moments ago',firstMile:'5 min walk → Metro',lastMile:'6 min walk → destination',steps:['Walk to Metro','Metro journey','Walk to destination'],geometry:geom,traffic:'Moderate'},
   {id:'r2',title:'Route 2',duration:28,cost:70,distance:8.6,walking:5,transfers:1,modes:['Auto / Rickshaw','Metro'],reason:'Quicker with lower walking, but more expensive.',context:'Demo transport context.',confidence:'Moderate',updated:'Moments ago',firstMile:'Auto pickup → Metro',lastMile:'5 min walk',steps:['Auto pickup','Metro journey','Final walk'],geometry:geom,traffic:'Heavy'},
