@@ -161,8 +161,82 @@ Helplines: ${stateName} Women Helpline ${helpline} • National Women Helpline 1
 Please contact the traveller immediately.
 View the Sarthi journey screen for the full route and support context.`;window.location.href=`sms:${toList}?body=${encodeURIComponent(msg)}`};
  const checkpointName=(i:number)=>['Metro Station','Main Crossing','Destination Approach'][i%3];
- const searchPlaces=async(q:string)=>{setSearch(q);if(q.trim().length<2){setResults([]);return}setSearching(true);try{const r=await fetch(`https://nominatim.openstreetmap.org/search?format=jsonv2&limit=7&countrycodes=in&addressdetails=1&q=${encodeURIComponent(q)}`,{headers:{Accept:'application/json'}});const d=await r.json();setResults(Array.isArray(d)?d:[])}catch{setResults(FALLBACK_PLACES.filter(x=>x.toLowerCase().includes(q.toLowerCase())).map(x=>({display_name:x,lat:String((location||{lat:28.6139}).lat),lon:String((location||{lng:77.209}).lng)})) as Place[])}finally{setSearching(false)}};
- const searchStartPlaces=async(q:string)=>{setStartSearch(q);if(q.trim().length<2){setStartResults([]);return}setSearchingStart(true);try{const r=await fetch(`https://nominatim.openstreetmap.org/search?format=jsonv2&limit=6&countrycodes=in&addressdetails=1&q=${encodeURIComponent(q)}`,{headers:{Accept:'application/json'}});const d=await r.json();setStartResults(Array.isArray(d)?d:[])}catch{setStartResults(FALLBACK_PLACES.filter(x=>x.toLowerCase().includes(q.toLowerCase())).map(x=>({display_name:x,lat:String((location||{lat:28.6139}).lat),lon:String((location||{lng:77.209}).lng)})) as Place[])}finally{setSearchingStart(false)}};
+const searchPlaces = async (q: string) => {
+  setSearch(q);
+
+  if (q.trim().length < 2) {
+    setResults([]);
+    return;
+  }
+
+  setSearching(true);
+
+  try {
+    const r = await fetch(
+      `/api/geocode?q=${encodeURIComponent(q.trim())}`
+    );
+
+    if (!r.ok) throw new Error("Location search failed");
+
+    const data = await r.json();
+
+    setResults(
+      Array.isArray(data?.places) ? data.places : []
+    );
+  } catch {
+    setResults(
+      FALLBACK_PLACES
+        .filter(x =>
+          x.toLowerCase().includes(q.toLowerCase())
+        )
+        .map(x => ({
+          display_name: x,
+          lat: String((location || { lat: 28.6139 }).lat),
+          lon: String((location || { lng: 77.209 }).lng)
+        })) as Place[]
+    );
+  } finally {
+    setSearching(false);
+  }
+};
+const searchStartPlaces = async (q: string) => {
+  setStartSearch(q);
+
+  if (q.trim().length < 2) {
+    setStartResults([]);
+    return;
+  }
+
+  setSearchingStart(true);
+
+  try {
+    const r = await fetch(
+      `/api/geocode?q=${encodeURIComponent(q.trim())}`
+    );
+
+    if (!r.ok) throw new Error("Start location search failed");
+
+    const data = await r.json();
+
+    setStartResults(
+      Array.isArray(data?.places) ? data.places : []
+    );
+  } catch {
+    setStartResults(
+      FALLBACK_PLACES
+        .filter(x =>
+          x.toLowerCase().includes(q.toLowerCase())
+        )
+        .map(x => ({
+          display_name: x,
+          lat: String((location || { lat: 28.6139 }).lat),
+          lon: String((location || { lng: 77.209 }).lng)
+        })) as Place[]
+    );
+  } finally {
+    setSearchingStart(false);
+  }
+};
  const selected=routes[selectedRoute] || null;
  const buildRoute=async()=>{if(!fromCoords||!toCoords){setRoutes(makeFallbackRoutes());nav('routes');return}setLoadingRoutes(true);try{const qs=`?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`;const [routeRes,contextRes]=await Promise.all([fetch(`/api/route-intelligence${qs}`),fetch(`/api/context-intelligence?lat=${fromCoords.lat}&lon=${fromCoords.lng}&connectivity=${encodeURIComponent(connectivity)}&battery=${battery}`)]);if(!routeRes.ok)throw new Error('backend route intelligence unavailable');const routeJson=await routeRes.json();if(!routeJson.success||!routeJson.routes?.length)throw new Error('no backend route');const weather=await contextRes.json().catch(()=>({context:{weather:{}}}));const w=weather.context?.weather||{};const priority=priorities.includes('Faster travel')?'fastest':priorities.includes('Lower walking')?'less_walking':priorities.includes('Lower cost')?'low_cost':'balanced';const raw=routeJson.routes.slice(0,3);const rts:Route[]=await Promise.all(raw.map(async(route:any,index:number)=>{const walk=index===0?Math.max(4,Math.round(route.distanceKm*0.18)):index===1?Math.max(3,Math.round(route.distanceKm*0.12)):2;const transfers=index===0?1:index===1?1:0;const modes=index===0?['Walk','Metro']:index===1?['Auto / Rickshaw','Metro']:['Cab'];const suitRes=await fetch(`/api/route-suitability?duration=${route.durationMin}&cost=${route.estimatedCost}&walking=${walk}&transfers=${transfers}&connectivity=${encodeURIComponent(connectivity)}&battery=${battery}&helpPoints=3&rain=${w.rain??0}&windSpeed=${w.windSpeed??0}&priority=${priority}`);const suit=suitRes.ok?await suitRes.json():null;return{id:`r${index+1}`,title:`Route ${index+1}`,duration:route.durationMin,cost:route.estimatedCost,distance:route.distanceKm,walking:walk,transfers,modes,reason:index===0?'Balanced option using the live routed path and your saved priorities.':index===1?'Alternative with lower walking and a different live road path.':'Direct-style option with minimal walking; provider details remain to be verified.',context:`Backend route intelligence • ${route.source}${suit?.recommendation?` • ${suit.recommendation}`:''}`,confidence:suit?.suitabilityScore>=.75?'High':suit?.suitabilityScore>=.55?'Moderate':'Limited',updated:'Backend • just now',firstMile:index===0?'5–8 min walk → transit':index===1?'Auto pickup → Metro':'Cab pickup near start',lastMile:index===0?'5–10 min walk → destination':index===1?'Short walk → destination':'Drop-off near destination',steps:(route.steps||[]).slice(0,5).map((x:any)=>x.name||x.maneuver?.instruction||'Continue'),geometry:(route.geometry?.coordinates||[]).map(([lng,lat]:[number,number])=>[lat,lng] as [number,number]),traffic:index===0?'Moderate':index===1?'Heavy':'Light',fingerprint:[route.distanceKm,route.durationMin,route.estimatedCost,suit?.suitabilityScore??null].map(String)}}));setRoutes(rts.length?rts:makeFallbackRoutes());setSelectedRoute(0);nav('routes')}catch{setRoutes(makeFallbackRoutes());nav('routes')}finally{setLoadingRoutes(false)}};
  const makeFallbackRoutes=():Route[]=>{const c=fromCoords||location||{lat:28.6139,lng:77.209};const d=toCoords||{lat:c.lat+0.03,lng:c.lng+0.02};const geom: [number,number][]=[[c.lat,c.lng],[c.lat+(d.lat-c.lat)*.35,c.lng+(d.lng-c.lng)*.35],[c.lat+(d.lat-c.lat)*.7,c.lng+(d.lng-c.lng)*.7],[d.lat,d.lng]];return [
