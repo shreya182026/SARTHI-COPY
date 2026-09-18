@@ -252,58 +252,74 @@ const buildRoute = async () => {
       `?from=${encodeURIComponent(from)}` +
       `&to=${encodeURIComponent(to)}`;
 
-    const [routeRes, contextRes, transitRes] = await Promise.all([
-      fetch(`/api/route-intelligence${qs}`),
+    const routeRes = await fetch(
+      `/api/route-intelligence${qs}`
+    );
 
-      fetch(
+    if (!routeRes.ok) {
+      throw new Error(
+        'Backend route intelligence unavailable'
+      );
+    }
+
+    const routeJson = await routeRes.json();
+
+    if (
+      !routeJson.success ||
+      !Array.isArray(routeJson.routes) ||
+      routeJson.routes.length === 0
+    ) {
+      throw new Error('No backend route');
+    }
+
+    let weatherData: any = {
+      context: {
+        weather: {}
+      }
+    };
+
+    try {
+      const contextRes = await fetch(
         `/api/context-intelligence` +
         `?lat=${fromCoords.lat}` +
         `&lon=${fromCoords.lng}` +
         `&connectivity=${encodeURIComponent(connectivity)}` +
         `&battery=${battery}`
-      ),
+      );
 
-      fetch(
+      if (contextRes.ok) {
+        weatherData = await contextRes.json();
+      }
+    } catch {
+      // Weather is optional.
+    }
+
+    const w =
+      weatherData?.context?.weather || {};
+
+    let transitStations: any[] = [];
+
+    try {
+      const transitRes = await fetch(
         `/api/transit-intelligence` +
         `?fromLat=${fromCoords.lat}` +
         `&fromLon=${fromCoords.lng}` +
         `&toLat=${toCoords.lat}` +
         `&toLon=${toCoords.lng}`
-      )
-    ]);
+      );
 
-    if (!routeRes.ok) {
-      throw new Error('Backend route intelligence unavailable');
+      if (transitRes.ok) {
+        const transitJson =
+          await transitRes.json();
+
+        transitStations =
+          Array.isArray(transitJson?.stations)
+            ? transitJson.stations
+            : [];
+      }
+    } catch {
+      // Transit information is optional.
     }
-
-    const routeJson = await routeRes.json();
-
-    if (!routeJson.success || !routeJson.routes?.length) {
-      throw new Error('No backend route');
-    }
-
-    const weather = await contextRes
-      .json()
-      .catch(() => ({
-        context: {
-          weather: {}
-        }
-      }));
-
-    const w = weather.context?.weather || {};
-
-    const transitJson = await transitRes
-      .json()
-      .catch(() => ({
-        success: false,
-        stations: []
-      }));
-
-    const transitStations = Array.isArray(
-      transitJson?.stations
-    )
-      ? transitJson.stations
-      : [];
 
     const priority =
       priorities.includes('Faster travel')
@@ -314,59 +330,36 @@ const buildRoute = async () => {
         ? 'low_cost'
         : 'balanced';
 
-    const raw = routeJson.routes.slice(0, 3);
+    const raw =
+      routeJson.routes.slice(0, 3);
 
-    const rts: Route[] = await Promise.all(
-      raw.map(async (route: any, index: number) => {
+    const rts: Route[] = [];
 
-        const walk = 0;
-        const transfers = 0;
+    for (
+      let index = 0;
+      index < raw.length;
+      index++
+    ) {
+      const route = raw[index];
 
-        const hasTransit =
-          transitStations.length > 0;
+      const walking = 0;
+      const transfers = 0;
 
-        const modes = hasTransit
-          ? ['Road', 'Public Transit']
-          : ['Road'];
+      const hasTransit =
+        transitStations.length > 0;
 
-        const priorityMatch =
-          priority === 'fastest'
-            ? route.durationMin <= 35
-              ? 1
-              : 0
-            : priority === 'low_cost'
-            ? route.estimatedCost <= 80
-              ? 1
-              : 0
-            : priority === 'less_walking'
-            ? walk <= 8
-              ? 1
-              : 0
-            : 0.5;
+      const modes = hasTransit
+        ? ['Road', 'Public Transit']
+        : ['Road'];
 
-        const mlRes = await fetch(
-          `/api/ml-route-suitability` +
-          `?duration=${route.durationMin}` +
-          `&cost=${route.estimatedCost}` +
-          `&walking=${walk}` +
-          `&transfers=${transfers}` +
-          `&connectivity=${encodeURIComponent(connectivity)}` +
-          `&battery=${battery}` +
-          `&helpPoints=3` +
-          `&rain=${w.rain ?? 0}` +
-          `&windSpeed=${w.windSpeed ?? 0}` +
-          `&priorityMatch=${priorityMatch}`
-        );
+      let suit: any = null;
 
-        const ml = mlRes.ok
-          ? await mlRes.json()
-          : null;
-
+      try {
         const suitRes = await fetch(
           `/api/route-suitability` +
           `?duration=${route.durationMin}` +
           `&cost=${route.estimatedCost}` +
-          `&walking=${walk}` +
+          `&walking=${walking}` +
           `&transfers=${transfers}` +
           `&connectivity=${encodeURIComponent(connectivity)}` +
           `&battery=${battery}` +
@@ -376,100 +369,96 @@ const buildRoute = async () => {
           `&priority=${priority}`
         );
 
-        const suit = suitRes.ok
-          ? await suitRes.json()
-          : null;
+        if (suitRes.ok) {
+          suit = await suitRes.json();
+        }
+      } catch {
+        // Suitability is optional.
+      }
 
-        return {
-          id: `r${index + 1}`,
+      rts.push({
+        id: `r${index + 1}`,
 
-          title: `Route ${index + 1}`,
+        title: `Route ${index + 1}`,
 
-          duration: route.durationMin,
+        duration: route.durationMin,
 
-          cost: route.estimatedCost,
+        cost: route.estimatedCost,
 
-          distance: route.distanceKm,
+        distance: route.distanceKm,
 
-          walking: walk,
+        walking,
 
-          transfers,
+        transfers,
 
-          modes,
+        modes,
 
-          reason:
-            index === 0
-              ? 'Direct road route based on the current routing result and your saved priorities.'
-              : index === 1
-              ? 'Alternative road route from the routing service.'
-              : 'Additional road-route alternative from the routing service.',
+        reason:
+          index === 0
+            ? 'Direct road route based on the current routing result and your saved priorities.'
+            : 'Alternative road route from the routing service.',
 
-          context:
-            `Backend route intelligence • ${route.source}` +
-            (
-              hasTransit
-                ? ' • Nearby public-transit infrastructure found'
-                : ' • No nearby public-transit infrastructure found'
-            ) +
-            (
-              ml?.model
-                ? ` • ${ml.model}`
-                : ''
-            ) +
-            (
-              suit?.recommendation
-                ? ` • ${suit.recommendation}`
-                : ''
+        context:
+          `Backend route intelligence • ${route.source}` +
+          (
+            hasTransit
+              ? ' • Nearby public-transit infrastructure found'
+              : ' • No nearby public-transit infrastructure found'
+          ) +
+          (
+            suit?.recommendation
+              ? ` • ${suit.recommendation}`
+              : ''
+          ),
+
+        confidence:
+          suit?.suitabilityScore >= 0.75
+            ? 'High'
+            : suit?.suitabilityScore >= 0.55
+            ? 'Moderate'
+            : 'Limited',
+
+        updated:
+          'Backend • just now',
+
+        firstMile:
+          hasTransit
+            ? `Road access + nearby transit infrastructure (${transitStations.length} station${transitStations.length === 1 ? '' : 's'})`
+            : 'Road journey starts from selected location',
+
+        lastMile:
+          hasTransit
+            ? 'Transit/road connection to selected destination'
+            : 'Road journey ends at selected destination',
+
+        steps:
+          (route.steps || [])
+            .slice(0, 5)
+            .map(
+              (x: any) =>
+                x.name ||
+                x.maneuver?.instruction ||
+                'Continue'
             ),
 
-          confidence:
-            suit?.suitabilityScore >= 0.75
-              ? 'High'
-              : suit?.suitabilityScore >= 0.55
-              ? 'Moderate'
-              : 'Limited',
+        geometry:
+          (route.geometry?.coordinates || [])
+            .map(
+              ([lng, lat]: [number, number]) =>
+                [lat, lng] as [number, number]
+            ),
 
-          updated: 'Backend • just now',
+        traffic:
+          'Unavailable',
 
-          firstMile:
-            hasTransit
-              ? `Road access + nearby transit infrastructure (${transitStations.length} station${transitStations.length === 1 ? '' : 's'})`
-              : 'Road journey starts from selected location',
-
-          lastMile:
-            hasTransit
-              ? 'Transit/road connection to selected destination'
-              : 'Road journey ends at selected destination',
-
-          steps:
-            (route.steps || [])
-              .slice(0, 5)
-              .map(
-                (x: any) =>
-                  x.name ||
-                  x.maneuver?.instruction ||
-                  'Continue'
-              ),
-
-          geometry:
-            (route.geometry?.coordinates || [])
-              .map(
-                ([lng, lat]: [number, number]) =>
-                  [lat, lng] as [number, number]
-              ),
-
-          traffic: 'Unavailable',
-
-          fingerprint: [
-            route.distanceKm,
-            route.durationMin,
-            route.estimatedCost,
-            suit?.suitabilityScore ?? null,
-            ml?.suitabilityScore ?? null
-          ].map(String)
-        };
-      })
-    );
+        fingerprint: [
+          route.distanceKm,
+          route.durationMin,
+          route.estimatedCost,
+          suit?.suitabilityScore ?? null
+        ].map(String)
+      });
+    }
 
     setRoutes(
       rts.length
@@ -482,7 +471,6 @@ const buildRoute = async () => {
     nav('routes');
 
   } catch (error) {
-
     console.error(
       'Route build error:',
       error
@@ -493,272 +481,10 @@ const buildRoute = async () => {
     nav('routes');
 
   } finally {
-
     setLoadingRoutes(false);
   }
 };
-
-  setLoadingRoutes(true);
-
-  try {
-    const qs =
-      `?from=${encodeURIComponent(from)}` +
-      `&to=${encodeURIComponent(to)}`;
-
-  const [routeRes, contextRes, transitRes] = await Promise.all([
-  fetch(`/api/route-intelligence${qs}`),
-
-  fetch(
-    `/api/context-intelligence?lat=${fromCoords.lat}` +
-    `&lon=${fromCoords.lng}` +
-    `&connectivity=${encodeURIComponent(connectivity)}` +
-    `&battery=${battery}`
-  ),
-
-  fetch(
-    `/api/transit-intelligence` +
-    `?fromLat=${fromCoords.lat}` +
-    `&fromLon=${fromCoords.lng}` +
-    `&toLat=${toCoords.lat}` +
-    `&toLon=${toCoords.lng}`
-  )
-]);
-
-    if (!routeRes.ok) {
-      throw new Error('Backend route intelligence unavailable');
-    }
-
-    const routeJson = await routeRes.json();
-
-    if (!routeJson.success || !routeJson.routes?.length) {
-      throw new Error('No backend route');
-    }
-
-    const weather = await contextRes
-      .json()
-      .catch(() => ({ context: { weather: {} } }));
-
-    const w = weather.context?.weather || {};
-    const transitJson = await transitRes
-  .json()
-  .catch(() => ({
-    success: false,
-    stations: []
-  }));
-
-const transitStations = Array.isArray(
-  transitJson?.stations
-)
-  ? transitJson.stations
-  : [];
-
-    const priority =
-      priorities.includes('Faster travel')
-        ? 'fastest'
-        : priorities.includes('Lower walking')
-        ? 'less_walking'
-        : priorities.includes('Lower cost')
-        ? 'low_cost'
-        : 'balanced';
-
-    const raw = routeJson.routes.slice(0, 3);
-
-    const rts: Route[] = await Promise.all(
-      raw.map(async (route: any, index: number) => {
-
-        /*
-         * IMPORTANT:
-         * OSRM currently gives us real road-routing data.
-         * It does NOT give us verified Metro/Auto/Cab availability
-         * or live traffic.
-         *
-         * Therefore we only label the route according to the
-         * actual routing source instead of pretending those
-         * transport details are live.
-         */
-
-        const walk = 0;
-        const transfers = 0;
-       const hasTransit =
-  transitStations.length > 0;
-
-const modes = hasTransit
-  ? ['Road', 'Public Transit']
-  : ['Road'];
-const priorityMatch =
-  priority === 'fastest'
-    ? route.durationMin <= 35
-      ? 1
-      : 0
-    : priority === 'low_cost'
-    ? route.estimatedCost <= 80
-      ? 1
-      : 0
-    : priority === 'less_walking'
-    ? walk <= 8
-      ? 1
-      : 0
-    : 0.5;
-
-const mlRes = await fetch(
-  `/api/ml-route-suitability` +
-  `?duration=${route.durationMin}` +
-  `&cost=${route.estimatedCost}` +
-  `&walking=${walk}` +
-  `&transfers=${transfers}` +
-  `&connectivity=${encodeURIComponent(connectivity)}` +
-  `&battery=${battery}` +
-  `&helpPoints=3` +
-  `&rain=${w.rain ?? 0}` +
-  `&windSpeed=${w.windSpeed ?? 0}` +
-  `&priorityMatch=${priorityMatch}`
-);
-
-const ml = mlRes.ok
-  ? await mlRes.json()
-  : null;
-        const suitRes = await fetch(
-          `/api/route-suitability` +
-          `?duration=${route.durationMin}` +
-          `&cost=${route.estimatedCost}` +
-          `&walking=${walk}` +
-          `&transfers=${transfers}` +
-          `&connectivity=${encodeURIComponent(connectivity)}` +
-          `&battery=${battery}` +
-          `&helpPoints=3` +
-          `&rain=${w.rain ?? 0}` +
-          `&windSpeed=${w.windSpeed ?? 0}` +
-          `&priority=${priority}`
-        );
-
-        const suit = suitRes.ok
-          ? await suitRes.json()
-          : null;
-
-        return {
-          id: `r${index + 1}`,
-
-          title: `Route ${index + 1}`,
-
-          duration: route.durationMin,
-
-          cost: route.estimatedCost,
-
-          distance: route.distanceKm,
-
-          walking: walk,
-
-          transfers,
-
-          modes,
-
-          reason:
-            index === 0
-              ? 'Direct road route based on the current routing result and your saved priorities.'
-              : index === 1
-              ? 'Alternative road route from the routing service.'
-              : 'Additional road-route alternative from the routing service.',
-
-         context:
-  `Backend route intelligence • ${route.source}` +
-  (
-    ml?.model
-      ? ` • ${ml.model}`
-      : ''
-  ) +
-  (
-    suit?.recommendation
-      ? ` • ${suit.recommendation}`
-      : ''
-  ),
-  (hasTransit
-    ? ' • Nearby public-transit infrastructure found'
-    : ' • No nearby public-transit infrastructure found') +
-            (
-              suit?.recommendation
-                ? ` • ${suit.recommendation}`
-                : ''
-            ),
-
-          confidence:
-            suit?.suitabilityScore >= 0.75
-              ? 'High'
-              : suit?.suitabilityScore >= 0.55
-              ? 'Moderate'
-              : 'Limited',
-
-          updated: 'Backend • just now',
-
-          firstMile:
-  hasTransit
-    ? `Road access + nearby transit infrastructure (${transitStations.length} station${transitStations.length === 1 ? '' : 's'})`
-    : 'Road journey starts from selected location',
-
-lastMile:
-  hasTransit
-    ? 'Transit/road connection to selected destination'
-    : 'Road journey ends at selected destination',
-
-          steps:
-            (route.steps || [])
-              .slice(0, 5)
-              .map(
-                (x: any) =>
-                  x.name ||
-                  x.maneuver?.instruction ||
-                  'Continue'
-              ),
-
-          geometry:
-            (route.geometry?.coordinates || [])
-              .map(
-                ([lng, lat]: [number, number]) =>
-                  [lat, lng] as [number, number]
-              ),
-
-          /*
-           * Traffic is NOT currently coming from a live traffic API.
-           * Keep this explicit instead of displaying a fabricated
-           * Heavy/Moderate/Light value.
-           */
-          traffic: 'Unavailable',
-
-         fingerprint: [
-  route.distanceKm,
-  route.durationMin,
-  route.estimatedCost,
-  suit?.suitabilityScore ?? null,
-  ml?.suitabilityScore ?? null
-].map(String)
-        };
-      })
-    );
-
-    setRoutes(
-      rts.length
-        ? rts
-        : makeFallbackRoutes()
-    );
-
-    setSelectedRoute(0);
-
-    nav('routes');
-
-  } catch (error) {
-
-    console.error('Route build error:', error);
-
-    setRoutes(makeFallbackRoutes());
-
-    nav('routes');
-
-  } finally {
-
-    setLoadingRoutes(false);
-
-  }
-};
- const makeFallbackRoutes=():Route[]=>{const c=fromCoords||location||{lat:28.6139,lng:77.209};const d=toCoords||{lat:c.lat+0.03,lng:c.lng+0.02};const geom: [number,number][]=[[c.lat,c.lng],[c.lat+(d.lat-c.lat)*.35,c.lng+(d.lng-c.lng)*.35],[c.lat+(d.lat-c.lat)*.7,c.lng+(d.lng-c.lng)*.7],[d.lat,d.lng]];return [
+  const makeFallbackRoutes=():Route[]=>{const c=fromCoords||location||{lat:28.6139,lng:77.209};const d=toCoords||{lat:c.lat+0.03,lng:c.lng+0.02};const geom: [number,number][]=[[c.lat,c.lng],[c.lat+(d.lat-c.lat)*.35,c.lng+(d.lng-c.lng)*.35],[c.lat+(d.lat-c.lat)*.7,c.lng+(d.lng-c.lng)*.7],[d.lat,d.lng]];return [
   {id:'r1',title:'Route 1',duration:32,cost:40,distance:9.2,walking:7,transfers:1,modes:['Walk','Metro'],reason:'Currently fits your saved priorities well.',context:'Demo road/transit context used because live routing is unavailable.',confidence:'Moderate',updated:'Moments ago',firstMile:'5 min walk → Metro',lastMile:'6 min walk → destination',steps:['Walk to Metro','Metro journey','Walk to destination'],geometry:geom,traffic:'Moderate'},
   {id:'r2',title:'Route 2',duration:28,cost:70,distance:8.6,walking:5,transfers:1,modes:['Auto / Rickshaw','Metro'],reason:'Quicker with lower walking, but more expensive.',context:'Demo transport context.',confidence:'Moderate',updated:'Moments ago',firstMile:'Auto pickup → Metro',lastMile:'5 min walk',steps:['Auto pickup','Metro journey','Final walk'],geometry:geom,traffic:'Heavy'},
   {id:'r3',title:'Route 3',duration:31,cost:180,distance:9.4,walking:2,transfers:0,modes:['Cab'],reason:'Minimal walking and no transfer.',context:'Cab integration is represented with demo data.',confidence:'Limited',updated:'Moments ago',firstMile:'Cab pickup',lastMile:'Drop-off',steps:['Cab pickup','Direct ride','Drop-off'],geometry:geom,traffic:'Light'}]};
