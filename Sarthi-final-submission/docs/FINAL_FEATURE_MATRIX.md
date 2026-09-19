@@ -1,0 +1,28 @@
+# Sarthi final feature matrix
+
+- Sarthi app identity + separate Disha AI guide
+- Welcome -> Get Started -> Sign Up / Log In / Guest
+- Phone -> OTP -> location -> language -> Disha intro -> profile -> travel style -> dashboard tour
+- 3 recommended languages + full language list; settings language change
+- Basic profile and saved travel preferences; per-journey adjustment
+- New Journey: Right Now / Pre-Journey
+- Start point + India-wide destination search + map
+- Travel modes incl. multimodal and cab-provider sync concept
+- Journey Priorities: select up to 7
+- Context-aware route comparison; no safety score
+- Real OpenStreetMap map + browser live GPS during active journey
+- Route geometry, checkpoints, help points
+- Journey Capsule at start
+- Live Journey + step progression + Something Changed
+- Battery: 40/20/10/5
+- Connectivity: Normal/Unstable/Low/Offline + sync
+- Light buzz and tight buzz/UEM with sample SMS previews
+- Emergency: Share Location / Get to Safety / Trusted Person / 112
+- State-aware women helpline display + national 181/112
+- Trusted contacts: 5; normal journey sharing configurable; emergency all five
+- UEM: automatic unresolved-stop escalation + manual in-app activation; secret-code cancellation concept; wrong-code alert concept
+- Nearby help points distinct from checkpoints
+- Reports -> evidence -> review -> reopen
+- Journey completion, calendar-based My Journeys, Frequent Journeys
+- Settings for user-facing controls
+- Sample journey walkthrough
